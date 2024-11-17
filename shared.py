@@ -20,6 +20,7 @@ import random
 import time
 import csv
 import logging
+import subprocess
 from PIL import Image, ImageFont 
 from logger import Logger
 from epd_helper import EPDHelper
@@ -35,6 +36,11 @@ class SharedData:
         self.last_comment_time = time.time() # Last time a comment was displayed
         self.default_config = self.get_default_config() # Default configuration of the application  
         self.config = self.default_config.copy() # Configuration of the application
+        # Load existing configuration first
+        self.load_config()
+
+        # Update MAC blacklist without immediate save
+        self.update_mac_blacklist()
         self.setup_environment() # Setup the environment
         self.initialize_variables() # Initialize the variables used by the application
         self.create_livestatusfile() 
@@ -136,13 +142,13 @@ class SharedData:
             "success_retry_delay": 900, 
             "ref_width" :122 ,
             "ref_height" : 250,
-            "epd_type": "epd2in13_V2",
+            "epd_type": "epd2in13_V4",
             
             
             "__title_lists__": "List Settings",
             "portlist": [20, 21, 22, 23, 25, 53, 69, 80, 110, 111, 135, 137, 139, 143, 161, 162, 389, 443, 445, 512, 513, 514, 587, 636, 993, 995, 1080, 1433, 1521, 2049, 3306, 3389, 5000, 5001, 5432, 5900, 8080, 8443, 9090, 10000],
-            "mac_scan_blacklist": ['00:11:32:c4:71:9b', '00:11:32:c4:71:9a'],
-            "ip_scan_blacklist": ['192.168.1.1', '192.168.1.12', '192.168.1.38','192.168.1.53', '192.168.1.40' , '192.168.1.29'],
+            "mac_scan_blacklist": [],
+            "ip_scan_blacklist": [],
             "steal_file_names": ["ssh.csv","hack.txt"],
             "steal_file_extensions": [".bjorn",".hack",".flag"],
             
@@ -160,16 +166,82 @@ class SharedData:
             "timewait_rdp": 0,
         }
 
+    def update_mac_blacklist(self):
+        """Update the MAC blacklist without immediate save."""
+        mac_address = self.get_raspberry_mac()
+        if mac_address:
+            if 'mac_scan_blacklist' not in self.config:
+                self.config['mac_scan_blacklist'] = []
+            
+            if mac_address not in self.config['mac_scan_blacklist']:
+                self.config['mac_scan_blacklist'].append(mac_address)
+                logger.info(f"Added local MAC address {mac_address} to blacklist")
+            else:
+                logger.info(f"Local MAC address {mac_address} already in blacklist")
+        else:
+            logger.warning("Could not add local MAC to blacklist: MAC address not found")
+
+
+
+    def get_raspberry_mac(self):
+        """Get the MAC address of the primary network interface (usually wlan0 or eth0)."""
+        try:
+            # First try wlan0 (wireless interface)
+            result = subprocess.run(['cat', '/sys/class/net/wlan0/address'], 
+                                 capture_output=True, text=True)
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip().lower()
+            
+            # If wlan0 fails, try eth0 (ethernet interface)
+            result = subprocess.run(['cat', '/sys/class/net/eth0/address'], 
+                                 capture_output=True, text=True)
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip().lower()
+            
+            logger.warning("Could not find MAC address for wlan0 or eth0")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting Raspberry Pi MAC address: {e}")
+            return None
+
+
+
     def setup_environment(self):
         """Setup the environment with the necessary directories and files."""
         os.system('cls' if os.name == 'nt' else 'clear')
-        self.load_config()
+        self.save_config()
         self.generate_actions_json()
         self.delete_webconsolelog()
         self.initialize_csv()
         self.initialize_epd_display()
     
 
+    # def initialize_epd_display(self):
+    #     """Initialize the e-paper display."""
+    #     try:
+    #         logger.info("Initializing EPD display...")
+    #         time.sleep(1)
+    #         self.epd_helper = EPDHelper(self.config["epd_type"])
+    #         self.epd_helper = EPDHelper(self.epd_type)
+    #         if self.config["epd_type"] == "epd2in13_V2":
+    #             logger.info("EPD type: epd2in13_V2 screen reversed")
+    #             self.screen_reversed = False
+    #             self.web_screen_reversed = False
+    #         elif self.config["epd_type"] == "epd2in13_V3":
+    #             logger.info("EPD type: epd2in13_V3 screen reversed")
+    #             self.screen_reversed = False
+    #             self.web_screen_reversed = False
+    #         elif self.config["epd_type"] == "epd2in13_V4":
+    #             logger.info("EPD type: epd2in13_V4 screen reversed")
+    #             self.screen_reversed = True
+    #             self.web_screen_reversed = True
+    #         self.epd_helper.init_full_update()
+    #         self.width, self.height = self.epd_helper.epd.width, self.epd_helper.epd.height
+    #         logger.info(f"EPD {self.config['epd_type']} initialized with size: {self.width}x{self.height}")
+    #     except Exception as e:
+    #         logger.error(f"Error initializing EPD display: {e}")
+    #         raise
     def initialize_epd_display(self):
         """Initialize the e-paper display."""
         try:
@@ -177,14 +249,18 @@ class SharedData:
             time.sleep(1)
             self.epd_helper = EPDHelper(self.config["epd_type"])
             self.epd_helper = EPDHelper(self.epd_type)
-            if self.config["epd_type"] == "epd2in13_V2":
+            if self.config["epd_type"] == "epd2in7":
+                logger.info("EPD type: epd2in7 screen reversed")
+                self.screen_reversed = False
+                self.web_screen_reversed = False
+            elif self.config["epd_type"] == "epd2in13_V2":
                 logger.info("EPD type: epd2in13_V2 screen reversed")
                 self.screen_reversed = False
                 self.web_screen_reversed = False
             elif self.config["epd_type"] == "epd2in13_V3":
                 logger.info("EPD type: epd2in13_V3 screen reversed")
-                self.screen_reversed = False
-                self.web_screen_reversed = False
+                self.screen_reversed = True
+                self.web_screen_reversed = True
             elif self.config["epd_type"] == "epd2in13_V4":
                 logger.info("EPD type: epd2in13_V4 screen reversed")
                 self.screen_reversed = True
@@ -195,7 +271,7 @@ class SharedData:
         except Exception as e:
             logger.error(f"Error initializing EPD display: {e}")
             raise
-
+        
     def initialize_variables(self):
         """Initialize the variables."""
         self.should_exit = False

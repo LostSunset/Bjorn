@@ -112,9 +112,9 @@ check_system_compatibility() {
 
     # Check RAM (Raspberry Pi Zero has 512MB RAM)
     total_ram=$(free -m | awk '/^Mem:/{print $2}')
-    if [ "$total_ram" -lt 429 ]; then
-        log "WARNING" "Low RAM detected. Required: 512MB, Found: ${total_ram}MB"
-        echo -e "${YELLOW}Your system has less RAM than recommended. This might affect performance.${NC}"
+    if [ "$total_ram" -lt 410 ]; then
+        log "WARNING" "Low RAM detected. Required: 512MB (410 With OS Running), Found: ${total_ram}MB"
+        echo -e "${YELLOW}Your system has less RAM than recommended. This might affect performance, but you can continue.${NC}"
         should_ask_confirmation=true
     else
         log "SUCCESS" "RAM check passed: ${total_ram}MB available"
@@ -122,7 +122,7 @@ check_system_compatibility() {
 
     # Check available disk space
     available_space=$(df -m /home | awk 'NR==2 {print $4}')
-    if [ "$available_space" -lt 1024 ]; then
+    if [ "$available_space" -lt 2048 ]; then
         log "WARNING" "Low disk space. Recommended: 1GB, Found: ${available_space}MB"
         echo -e "${YELLOW}Your system has less free space than recommended. This might affect installation.${NC}"
         should_ask_confirmation=true
@@ -255,8 +255,10 @@ root hard nofile 65535
 EOF
 
     # Configure systemd limits
-    sed -i 's/#DefaultLimitNOFILE=/DefaultLimitNOFILE=65535/' /etc/systemd/system.conf
-    sed -i 's/#DefaultLimitNOFILE=/DefaultLimitNOFILE=65535/' /etc/systemd/user.conf
+    sed -i '/^#DefaultLimitNOFILE=/d' /etc/systemd/system.conf
+    echo "DefaultLimitNOFILE=65535" >> /etc/systemd/system.conf
+    sed -i '/^#DefaultLimitNOFILE=/d' /etc/systemd/user.conf
+    echo "DefaultLimitNOFILE=65535" >> /etc/systemd/user.conf
 
     # Create /etc/security/limits.d/90-nofile.conf
     cat > /etc/security/limits.d/90-nofile.conf << EOF
@@ -364,6 +366,9 @@ StandardOutput=inherit
 StandardError=inherit
 Restart=always
 User=root
+
+# Check open files and restart if it reached the limit (ulimit -n buffer of 1000)
+ExecStartPost=/bin/bash -c 'FILE_LIMIT=\$(ulimit -n); THRESHOLD=\$(( FILE_LIMIT - 1000 )); while :; do TOTAL_OPEN_FILES=\$(lsof | wc -l); if [ "\$TOTAL_OPEN_FILES" -ge "\$THRESHOLD" ]; then echo "File descriptor threshold reached: \$TOTAL_OPEN_FILES (threshold: \$THRESHOLD). Restarting service."; systemctl restart bjorn.service; exit 0; fi; sleep 10; done &'
 
 [Install]
 WantedBy=multi-user.target
@@ -531,6 +536,7 @@ main() {
     echo "2. epd2in13_V2"
     echo "3. epd2in13_V3"
     echo "4. epd2in13_V4"
+    echo "5. epd2in7"
     
     while true; do
         read -p "Enter your choice (1-4): " epd_choice
@@ -539,7 +545,8 @@ main() {
             2) EPD_VERSION="epd2in13_V2"; break;;
             3) EPD_VERSION="epd2in13_V3"; break;;
             4) EPD_VERSION="epd2in13_V4"; break;;
-            *) echo -e "${RED}Invalid choice. Please select 1-4.${NC}";;
+            5) EPD_VERSION="epd2in7"; break;;
+            *) echo -e "${RED}Invalid choice. Please select 1-5.${NC}";;
         esac
     done
 
@@ -593,6 +600,9 @@ main() {
             clean_exit 1
             ;;
     esac
+
+    #removed git files
+    find "$BJORN_PATH" -name ".git*" -exec rm -rf {} +
 
     log "SUCCESS" "BJORN installation completed!"
     log "INFO" "Please reboot your system to apply all changes."
